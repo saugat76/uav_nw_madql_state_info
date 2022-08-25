@@ -1,4 +1,6 @@
+from ctypes import sizeof
 from ctypes.wintypes import tagRECT
+from opcode import stack_effect
 from os import stat, stat_result, times_result
 import random
 from re import S
@@ -40,15 +42,15 @@ class NeuralNetwork(nn.Module):
         self.state_size = state_size
         self.action_size = action_size
         self.linear_stack = model = nn.Sequential(
-            nn.Linear(self.state_size,256),
+            nn.Linear(self.state_size,400),
             nn.ReLU(),
-            nn.Linear(256,128),
+            nn.Linear(400,400),
             nn.ReLU(),
-            nn.Linear(128,128),
-            nn.ReLU(),
-            nn.Linear(128,64),
-            nn.ReLU(),
-            nn.Linear(64, self.action_size)
+            # nn.Linear(128,128),
+            # nn.ReLU(),
+            # nn.Linear(128,64),
+            # nn.ReLU(),
+            nn.Linear(400, self.action_size)
         ).to(device=device)
 
     def forward(self, x):
@@ -60,7 +62,7 @@ class NeuralNetwork(nn.Module):
 class DQL:
     # Initializing a Deep Neural Network
     def __init__(self):
-        self.state_size = 2
+        self.state_size = 10
         self.action_size = 5
         self.replay_buffer = deque(maxlen = 125000)
         self.gamma = 0.90
@@ -83,12 +85,12 @@ class DQL:
             action = np.random.randint(0, 4)
         else:
             state = torch.unsqueeze(torch.FloatTensor(state),0)
-            # print(state)
-            Q_values = self.main_network.forward(state)
+            state = state.flatten()
+            Q_values = self.main_network.forward(state.float())
             # print(Q_values)
-            action = torch.max(Q_values.cpu(), 1)[1].data.numpy()
-            # print(action)
-            action = action[0]
+            action = int(torch.argmax(Q_values.cpu()))
+            # print(int(action))
+            # action = action[0]
         return action
 
     # Training of the DNN 
@@ -110,6 +112,11 @@ class DQL:
             reward = reward.to(device = device)
             next_state = next_state.to(device = device)
             done = done.to(device = device)
+            # next_state = torch.unsqueeze(torch.FloatTensor(next_state),0)
+            # next_state = next_state.flatten()
+            # state = torch.unsqueeze(torch.FloatTensor(state), 0)
+            # state = state.flatten()
+            # next_state = torch.reshape(next_state,(10,))
             Q_next = self.target_network(next_state).detach()
             target_Q = reward.cpu().squeeze() + self.gamma * Q_next.cpu().max(1)[0].view(batch_size_internal, 1).squeeze() * (
                 1 - np.array([state[e].cpu().mean() == next_state[e].cpu().mean() for e in range(len(next_state))])
@@ -219,7 +226,8 @@ for i_episode in range(num_episode):
         states_ten = torch.from_numpy(states)
         # print(states_ten)
         for k in range(NUM_UAV):
-            state = states_ten[k, :]
+            state = states_ten[:, :] # Store position of all UAVs // info sharing
+            state = state.flatten()
             # print(state)                
             action = UAV_OB[k].epsilon_greedy(state.float())
             # print(action)
@@ -230,6 +238,7 @@ for i_episode in range(num_episode):
 
         # Find the global reward for the combined set of actions for the UAV
         # print(drone_act_list)
+        # print(drone_act_list)
         temp_data = u_env.step(drone_act_list)
         reward = temp_data[1]
         done = temp_data[2]
@@ -237,9 +246,11 @@ for i_episode in range(num_episode):
 
         # Store the transition information
         for k in range(NUM_UAV):
-                state = states_ten[k, :]
+                state = states_ten[:, :] # Storing the state of all the UAVs equivalent to sharing of the position info
+                state = state.flatten()
                 action = drone_act_list[k] - 1
-                next_sta = next_state[k, :]
+                next_sta = next_state[:, :]
+                next_sta = next_sta.flatten()
                 reward_ind = reward[k]
                 UAV_OB[k].store_transition(state, action, reward_ind, next_sta, done)
 
@@ -264,12 +275,13 @@ for i_episode in range(num_episode):
         for t in range(100):
             drone_act_list = []
             for k in range(NUM_UAV):
-                state = states[k,:]
+                state = states[:,:]
                 state = torch.unsqueeze(torch.FloatTensor(state),0)
+                state = state.flatten()
                 Q_values = UAV_OB[k].main_network.forward(state.float())
                 # print(Q_values)
-                best_next_action = torch.max(Q_values.cpu(), 1)[1].data.numpy()
-                best_next_action = best_next_action[0]
+                best_next_action = int(torch.argmax(Q_values.cpu()))
+                # best_next_action = best_next_action[0]
                 drone_act_list.append(best_next_action + 1)
             temp_data = u_env.step(drone_act_list)
             states = u_env.get_state()
@@ -282,9 +294,7 @@ for i_episode in range(num_episode):
         print(drone_act_list)
         print("Reward in this episode is: ", temp_data[1])
         print("Number of user connected in ",i_episode," episode is: ", temp_data[4])
-        print("Total number of user connected in ", i_episode, " episode is: ", sum(temp_data[4]))
-        print("Resource Block Allocated is: ", list(temp_data[5]))
-        
+        print("Total number of user connected in ", i_episode, " episode is: ", sum(temp_data[4]))        
 
 
 

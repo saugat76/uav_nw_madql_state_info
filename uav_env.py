@@ -1,8 +1,8 @@
+
 ###################################
 ## Environment Setup of for UAV  ##
 ###################################
 
-from hashlib import new
 from turtle import pos
 import gym
 from gym import spaces
@@ -32,7 +32,7 @@ class UAVenv(gym.Env):
     UAV_HEIGHT = 350
     BS_LOC = np.zeros((NUM_UAV, 3))
     THETA = 60 * math.pi / 180  # in radian   # Bandwidth for a resource block (This value is representing 2*theta instead of theta)
-    BW_UAV = 8e6  # Total Bandwidth per UAV   # Update to decrease the available BW
+    BW_UAV = 4e6  # Total Bandwidth per UAV   # Update to decrease the available BW
     BW_RB = 180e3  # Bandwidth of a Resource Block
     ACTUAL_BW_UAV = BW_UAV * 0.9
     grid_space = 100
@@ -68,13 +68,8 @@ class UAVenv(gym.Env):
     # np.savetxt('UserLocation.txt', USER_LOC, fmt='%.3e', delimiter=' ', newline='\n')
 
     # Saving the user location on a file instead of generating everytime
+
     USER_LOC = np.loadtxt('UserLocation.txt', delimiter=' ').astype(np.int64)
-
-    # User RB requirement // currently based randomly, can be later calculated using SINR value and Shannon Capacity Theorem
-    # USER_RB_REQ = np.random.randint(low=1, high=4, size=(NUM_USER, 1))
-    # np.savetxt('UserRBReq.txt', USER_RB_REQ, delimiter=' ', newline='\n')
-    USER_RB_REQ = np.loadtxt('UserRBReq.txt', delimiter=' ').astype(np.int64)
-
 
     def __init__(self):
         super(UAVenv, self).__init__()
@@ -159,12 +154,10 @@ class UAVenv(gym.Env):
                     connection_request[close_uav, i] = 1                  # All staifies, then connection request for the UAV - User
 
 
-        # Allocating only 80% of max cap in first run
+        # Allocating only 70% of max cap in first run
         # After all the user has send their connection request,
         # UAV only admits Users closest to and if bandwidth is available
         user_asso_flag = np.zeros(shape=(self.NUM_UAV, self.NUM_USER), dtype="int")
-        rb_allocated = np.zeros(shape=(self.NUM_UAV,1), dtype="int")
-
         for i in range(self.NUM_UAV):
             # Maximum Capacity for a single UAV
             cap_user_num = int(0.8 * max_user_num)
@@ -173,18 +166,15 @@ class UAVenv(gym.Env):
             temp_user_distance = dist_u_uav[i, temp_user]
             temp_user_sorted = np.argsort(temp_user_distance) # Contains user index with closest 2D distance value (out of requested user)
             # The user list are already sorted, to associate flag bit of user upto the index from
+            # min(max_user, max_number_of_user_inside_coverage_area)
+            temp_user_idx = temp_user_sorted[0, 0:(min(cap_user_num, (np.size(temp_user_sorted)))-1)]
             # Index for the mid numpy array
             temp_user = np.array(temp_user)
             # Actual index of the users that send connection request, selected using distance value within the defined capacity
-            temp_user_actual_idx = temp_user[0, temp_user_sorted]
-            for us_idx in temp_user_actual_idx[0]:
-                # print(self.USER_RB_REQ[us_idx])
-                # print(rb_allocated[i])
-                if self.USER_RB_REQ[us_idx] + rb_allocated[i] <= cap_user_num:
-                    user_asso_flag[i, us_idx] = 1
-                    rb_allocated[i] += self.USER_RB_REQ[us_idx]
-                else:
-                    break
+            temp_user_actual_idx = temp_user[0, temp_user_idx]
+            # Set user association flag to 1 for that UAV and closest user index
+            user_asso_flag[i, temp_user_actual_idx] = 1
+
 
         # For the second sweep, sweep through all users
         # If the user is not associated choose the closest UAV and check whether it has any available resource
@@ -195,13 +185,13 @@ class UAVenv(gym.Env):
                 close_uav_id = [i[0] for i in sorted(enumerate(close_uav_id), key=lambda x: x[1])]
                 if dist_u_uav[close_uav_id[0], j] <= self.coverage_radius:
                     for close_id in close_uav_id:
-                        if np.sum(rb_allocated[close_id]) < max_user_num:
-                            rb_allocated[close_id] += self.USER_RB_REQ[j]
+                        if np.sum(user_asso_flag[close_id,:]) < max_user_num:
                             user_asso_flag[close_id, j] = 1
                             break
 
+
         # Need to work on the return parameter of done, info, reward, and obs
-        # Calculation of reward function too i.e. total bandwidth providednew to the user
+        # Calculation of reward function too i.e. total bandwidth provided to the user
         new_reward = np.sum(user_asso_flag, axis = 1)
         reward = new_reward
         if flag != 0:
@@ -210,9 +200,10 @@ class UAVenv(gym.Env):
         
         if action == [5,5,5,5,5]:
             isDone = True
-
+        # print(reward)
+        # print(new_reward)
         # Return of obs, reward, done, info
-        return np.copy(self.state).reshape(1, self.NUM_UAV * 3), reward, isDone, "empty", new_reward, rb_allocated
+        return np.copy(self.state).reshape(1, self.NUM_UAV * 3), reward, isDone, "empty", new_reward
 
     def render(self, ax, mode='human', close=False):
         # implement viz
@@ -246,3 +237,4 @@ class UAVenv(gym.Env):
             state_loc[k, 0] = self.state[k, 0]
             state_loc[k, 1] = self.state[k, 1]
         return state_loc
+
